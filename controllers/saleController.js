@@ -192,63 +192,156 @@ const getSales = async (req, res) => {
 const getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
+   let sale;
 
-    console.log("Sale ID:", id);
-
-    let sale;
-
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      console.log("Searching by ObjectId");
-      sale = await Sale.findById(id)
-        .populate("branch", "name location")
-        .populate("createdBy", "username");
-    } else {
-      console.log("Searching by invoice");
-      sale = await Sale.findOne({ invoiceNumber: id })
-        .populate("branch", "name location")
-        .populate("createdBy", "username");
-    }
-
-    console.log("Sale:", sale);
+if (mongoose.Types.ObjectId.isValid(id)) {
+  sale = await Sale.findById(id)
+    .populate("branch", "name location")
+    .populate("createdBy", "username");
+} else {
+  sale = await Sale.findOne({ invoiceNumber: id })
+    .populate("branch", "name location")
+    .populate("createdBy", "username");
+}
 
     if (!sale) {
       return res.status(404).json({
         success: false,
-        message: "Sale not found"
+        message: 'Sale not found'
       });
     }
 
-    res.json({
+    res.status(200).json({
       success: true,
       sale
     });
-
-  } catch (err) {
-    console.error(err);   // مهم جدًا
+  } catch (error) {
     res.status(500).json({
       success: false,
-      message: err.message,
-      stack: err.stack
+      message: error.message
     });
   }
 };
+
 // @desc Return full sale
-let sale;
+const returnFullSale = async (req, res) => {
+  try {
+    const { id } = req.params;
+   let sale;
 
 if (mongoose.Types.ObjectId.isValid(id)) {
   sale = await Sale.findById(id);
 } else {
   sale = await Sale.findOne({ invoiceNumber: id });
 }
+
+    if (!sale || sale.status === 'returned') {
+      return res.status(404).json({
+        success: false,
+        message: 'Sale not found or already returned'
+      });
+    }
+
+    const session = await mongoose.startSession();
+    await withTransaction(session, async (session) => {
+      sale.status = 'returned';
+      sale.returnType = 'full';
+      sale.returnedAt = new Date();
+      await sale.save({ session });
+
+      await Promise.all(
+        sale.items.map((item) =>
+          Product.findByIdAndUpdate(
+            item.product,
+            { $inc: { quantity: item.qty } },
+            { session }
+          )
+        )
+      );
+    });
+
+    await createLog({
+      action: 'return_sale_item',
+      userId: req.employee._id,
+      branchId: sale.branch,
+      message: `${req.employee.username} returned item from sale ${sale.invoiceNumber}`
+    });
+
+    res.status(200).json({
+      success: true,
+      sale
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
 
 // @desc Return sale item
-let sale;
+const returnSaleItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { productId } = req.body;
+
+   let sale;
 
 if (mongoose.Types.ObjectId.isValid(id)) {
   sale = await Sale.findById(id);
 } else {
   sale = await Sale.findOne({ invoiceNumber: id });
 }
+
+    if (!sale || sale.status === 'returned') {
+      return res.status(404).json({
+        success: false,
+        message: 'Sale not found or already returned'
+      });
+    }
+
+    const item = sale.items.find((i) => String(i.product) === String(productId));
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: 'Item not found in sale'
+      });
+    }
+
+    const session = await mongoose.startSession();
+    await withTransaction(session, async (session) => {
+      sale.items = sale.items.filter((i) => String(i.product) !== String(productId));
+      sale.status = sale.items.length === 0 ? 'returned' : 'partial_return';
+      sale.returnType = sale.items.length === 0 ? 'full' : 'partial';
+      sale.returnedAt = new Date();
+
+      const totals = computeTotals(sale.items, sale.discount, sale.tax);
+      sale.subtotal = totals.subtotal;
+      sale.totalAmount = totals.totalAmount;
+      sale.totalCost = totals.totalCost;
+      sale.totalProfit = totals.totalProfit;
+      sale.profitMargin = totals.profitMargin;
+
+      await sale.save({ session });
+
+      await Product.findByIdAndUpdate(
+        productId,
+        { $inc: { quantity: item.qty } },
+        { session }
+      );
+    });
+
+    res.status(200).json({
+      success: true,
+      sale
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
 
 module.exports = {
   createSale,
