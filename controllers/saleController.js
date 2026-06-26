@@ -191,6 +191,8 @@ const getSales = async (req, res) => {
 // @desc Get sale by id or invoice
 const getSaleById = async (req, res) => {
   try {
+    console.log("====== GET SALE ======");
+    console.log("ID =", req.params.id);
     const { id } = req.params;
    let sale;
 
