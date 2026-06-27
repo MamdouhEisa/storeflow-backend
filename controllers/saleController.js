@@ -191,20 +191,12 @@ const getSales = async (req, res) => {
 // @desc Get sale by id or invoice
 const getSaleById = async (req, res) => {
   try {
-    console.log("====== GET SALE ======");
-    console.log("ID =", req.params.id);
     const { id } = req.params;
-   let sale;
-
-if (mongoose.Types.ObjectId.isValid(id)) {
-  sale = await Sale.findById(id)
-    .populate("branch", "name location")
-    .populate("createdBy", "username");
-} else {
-  sale = await Sale.findOne({ invoiceNumber: id })
-    .populate("branch", "name location")
-    .populate("createdBy", "username");
-}
+    const sale = await Sale.findOne({
+      $or: [{ _id: id }, { invoiceNumber: id }]
+    })
+      .populate('branch', 'name location')
+      .populate('createdBy', 'username');
 
     if (!sale) {
       return res.status(404).json({
@@ -229,13 +221,9 @@ if (mongoose.Types.ObjectId.isValid(id)) {
 const returnFullSale = async (req, res) => {
   try {
     const { id } = req.params;
-   let sale;
-
-if (mongoose.Types.ObjectId.isValid(id)) {
-  sale = await Sale.findById(id);
-} else {
-  sale = await Sale.findOne({ invoiceNumber: id });
-}
+    const sale = await Sale.findOne({
+      $or: [{ _id: id }, { invoiceNumber: id }]
+    });
 
     if (!sale || sale.status === 'returned') {
       return res.status(404).json({
@@ -287,13 +275,9 @@ const returnSaleItem = async (req, res) => {
     const { id } = req.params;
     const { productId } = req.body;
 
-   let sale;
-
-if (mongoose.Types.ObjectId.isValid(id)) {
-  sale = await Sale.findById(id);
-} else {
-  sale = await Sale.findOne({ invoiceNumber: id });
-}
+    const sale = await Sale.findOne({
+      $or: [{ _id: id }, { invoiceNumber: id }]
+    });
 
     if (!sale || sale.status === 'returned') {
       return res.status(404).json({
